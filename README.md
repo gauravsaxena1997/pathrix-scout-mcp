@@ -90,3 +90,4 @@ SQLite at `~/.local/share/pathrix-scout/scout.db` - WAL mode, FTS5 search. Creat
 ## License
 
 MIT
+# pathrix-scout-mcp
