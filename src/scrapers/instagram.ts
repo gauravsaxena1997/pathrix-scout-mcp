@@ -1,0 +1,103 @@
+import { spawnSync } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
+import { urlToId } from "../store/db";
+import type { RawItem, ProfileSnapshot } from "../schema";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SCRIPT = path.join(__dirname, "../python/instagram.py");
+
+function getVenvPython(): string {
+  if (process.env.SCOUT_VENV_PYTHON) return process.env.SCOUT_VENV_PYTHON;
+  const candidates = [
+    path.join(process.cwd(), "src", "lib", "scout", ".venv", "bin", "python3"),
+    path.join(__dirname, "../../.venv", "bin", "python3"),
+  ];
+  return candidates.find((c) => fs.existsSync(c)) ?? "python3";
+}
+
+function runScript(args: string[]): any {
+  const python = getVenvPython();
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    SCOUT_IG_USERNAME: process.env.SCOUT_IG_USERNAME ?? "",
+    SCOUT_IG_PASSWORD: process.env.SCOUT_IG_PASSWORD ?? "",
+  };
+  const result = spawnSync(python, [SCRIPT, ...args], {
+    encoding: "utf8",
+    timeout: 60_000,
+    maxBuffer: 5 * 1024 * 1024,
+    env,
+  });
+  if (result.error) throw new Error(`Instagram script error: ${result.error.message}`);
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    throw new Error(`Instagram script parse error: ${result.stdout?.slice(0, 200)}`);
+  }
+}
+
+function mapMedia(m: any): RawItem | null {
+  if (!m?.url) return null;
+  return {
+    id: urlToId(m.url),
+    source: "instagram",
+    title: (m.caption ?? "").slice(0, 200),
+    body: m.caption ?? "",
+    url: m.url,
+    author: m.author ? `@${m.author}` : "",
+    publishedAt: m.publishedAt ?? new Date().toISOString(),
+    scoutScore: 0,
+    engagement: {
+      score: m.likes ?? 0,
+      comments: m.comments ?? 0,
+      ratio: undefined,
+      topComment: undefined,
+      probability: undefined,
+    },
+  };
+}
+
+export async function searchInstagram(query: string, limit = 20): Promise<RawItem[]> {
+  const raw = runScript(["search", query, "--limit", String(limit)]) as any;
+  if (!Array.isArray(raw)) {
+    if (raw?.error) throw new Error(`Instagram search: ${raw.error}`);
+    return [];
+  }
+  return raw.flatMap((m) => mapMedia(m) ?? []).slice(0, limit);
+}
+
+export async function scrapeInstagramProfile(handle: string): Promise<ProfileSnapshot> {
+  const clean = handle.replace(/^@/, "");
+  const raw = runScript(["profile", clean]);
+
+  if (raw?.error) throw new Error(`Instagram profile: ${raw.error}`);
+
+  const posts = (raw.posts ?? []).map((p: any) => ({
+    id: p.id ?? urlToId(p.url ?? ""),
+    url: p.url ?? "",
+    content: p.caption ?? "",
+    publishedAt: p.publishedAt ?? new Date().toISOString(),
+    likes: p.likes ?? 0,
+    comments: p.comments ?? 0,
+    shares: 0,
+    views: 0,
+    isViral: (p.likes ?? 0) > 10_000,
+  }));
+
+  return {
+    platform: "instagram",
+    handle: clean,
+    fetchedAt: new Date().toISOString(),
+    followers: raw.followers ?? 0,
+    posts,
+    stats: {
+      followersCount: raw.followers ?? 0,
+      followingCount: raw.following ?? 0,
+      postsCount: raw.postsCount ?? 0,
+      avgLikes: raw.stats?.avgLikes ?? 0,
+      avgComments: raw.stats?.avgComments ?? 0,
+    },
+  };
+}

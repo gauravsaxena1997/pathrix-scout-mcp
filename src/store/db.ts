@@ -2,14 +2,15 @@ import path from "path";
 import os from "os";
 import fs from "fs";
 import crypto from "crypto";
+import { createRequire } from "module";
 import type { RawItem, SourceItem, ProfileSnapshot } from "../schema";
+
+const _require = createRequire(import.meta.url);
 
 let _db: ReturnType<typeof openDb> | null = null;
 
 function openDb() {
-  // Dynamic import of better-sqlite3 to avoid bundling issues
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const Database = require("better-sqlite3");
+  const Database = _require("better-sqlite3");
 
   const dir = path.join(os.homedir(), ".local", "share", "pathrix-scout");
   fs.mkdirSync(dir, { recursive: true });
@@ -55,7 +56,15 @@ function openDb() {
       followers INTEGER DEFAULT 0,
       posts_json TEXT,
       stats_json TEXT,
+      data_json TEXT,
       UNIQUE(platform, handle, fetched_at)
+    );
+
+    CREATE TABLE IF NOT EXISTS resolved_threads (
+      platform TEXT NOT NULL,
+      comment_id TEXT NOT NULL,
+      resolved_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (platform, comment_id)
     );
 
     CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
@@ -73,6 +82,12 @@ function openDb() {
       INSERT INTO items_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
     END;
   `);
+
+  // Migration: add data_json column if it doesn't exist yet
+  const cols = db.pragma("table_info(profile_snapshots)") as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "data_json")) {
+    db.exec(`ALTER TABLE profile_snapshots ADD COLUMN data_json TEXT`);
+  }
 
   return db;
 }
@@ -130,8 +145,8 @@ export function saveProfileSnapshot(snapshot: ProfileSnapshot) {
   const db = getDb();
   const id = crypto.randomUUID();
   db.prepare(`
-    INSERT OR REPLACE INTO profile_snapshots (id, platform, handle, fetched_at, followers, posts_json, stats_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO profile_snapshots (id, platform, handle, fetched_at, followers, posts_json, stats_json, data_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     snapshot.platform,
@@ -139,7 +154,8 @@ export function saveProfileSnapshot(snapshot: ProfileSnapshot) {
     snapshot.fetchedAt,
     snapshot.followers,
     JSON.stringify(snapshot.posts),
-    JSON.stringify(snapshot.stats)
+    JSON.stringify(snapshot.stats),
+    JSON.stringify(snapshot)
   );
 }
 
@@ -171,6 +187,10 @@ export function getLatestProfileSnapshot(platform: string): ProfileSnapshot | nu
     ORDER BY fetched_at DESC LIMIT 1
   `).get(platform) as any;
   if (!row) return null;
+  // Prefer full snapshot JSON if available (includes avatarUrl, bannerUrl, displayName, pendingThreads)
+  if (row.data_json) {
+    try { return JSON.parse(row.data_json) as ProfileSnapshot; } catch { /* fall through */ }
+  }
   return {
     platform: row.platform,
     handle: row.handle,
@@ -179,6 +199,19 @@ export function getLatestProfileSnapshot(platform: string): ProfileSnapshot | nu
     posts: JSON.parse(row.posts_json ?? "[]"),
     stats: JSON.parse(row.stats_json ?? "{}"),
   };
+}
+
+export function resolveThread(platform: string, commentId: string): void {
+  const db = getDb();
+  db.prepare(`INSERT OR REPLACE INTO resolved_threads (platform, comment_id) VALUES (?, ?)`)
+    .run(platform, commentId);
+}
+
+export function isThreadResolved(platform: string, commentId: string): boolean {
+  const db = getDb();
+  const row = db.prepare(`SELECT 1 FROM resolved_threads WHERE platform=? AND comment_id=?`)
+    .get(platform, commentId);
+  return !!row;
 }
 
 function rowToItem(row: any): RawItem {

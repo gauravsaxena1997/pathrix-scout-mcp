@@ -27,13 +27,13 @@ function mapRepo(repo: any): RawItem | null {
   const raw: RawItem = {
     id,
     source: "github",
-    title: `${repo.nameWithOwner ?? repo.name}: ${repo.description ?? ""}`,
+    title: `${repo.fullName ?? repo.nameWithOwner ?? repo.name}: ${repo.description ?? ""}`,
     body: repo.description ?? "",
     url,
-    author: repo.owner?.login ?? repo.nameWithOwner?.split("/")?.[0] ?? "",
+    author: repo.owner?.login ?? repo.fullName?.split("/")?.[0] ?? repo.nameWithOwner?.split("/")?.[0] ?? "",
     engagement: {
-      score: repo.stargazerCount ?? repo.stargazers_count ?? 0,
-      comments: repo.forkCount ?? repo.forks_count ?? 0,
+      score: repo.forksCount ?? repo.forkCount ?? repo.forks_count ?? 0,
+      comments: 0,
     },
     publishedAt: repo.pushedAt ?? repo.pushed_at ?? "",
     scoutScore: 0,
@@ -44,7 +44,7 @@ function mapRepo(repo: any): RawItem | null {
 
 export async function searchGithub(query: string, limit = 15): Promise<RawItem[]> {
   const json = runGh(
-    `search repos ${JSON.stringify(query)} --json nameWithOwner,description,stargazerCount,forkCount,url,pushedAt,owner --limit ${limit}`
+    `search repos ${JSON.stringify(query)} --json fullName,description,forksCount,url,pushedAt,owner --limit ${limit}`
   );
   return (Array.isArray(json) ? json : json?.items ?? [])
     .map(mapRepo)

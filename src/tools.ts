@@ -6,23 +6,25 @@ import type { RawItem } from "./schema";
 import { applyScores } from "./intelligence/score";
 import { rrfFuse, buildStreams, nearDedup } from "./intelligence/fusion";
 import { runScrapers } from "./intelligence/parallel";
-import { SOURCE_QUALITY } from "./config";
-import { saveRun, saveItems, searchItems, saveProfileSnapshot, getLatestProfileSnapshot } from "./store/db";
+import { SOURCE_QUALITY, OWN_HANDLES, WEB_SEARCH } from "./config";
+import { saveRun, saveItems, searchItems, saveProfileSnapshot, getLatestProfileSnapshot, resolveThread, getRecentItems } from "./store/db";
 
-// ─── Lazy imports for scrapers ────────────────────────────────────────────────
+// ─── Lazy scraper imports ─────────────────────────────────────────────────────
 
-async function getReddit() {
-  return import("./scrapers/reddit");
-}
-async function getHn() {
-  return import("./scrapers/hn");
-}
-async function getGithub() {
-  return import("./scrapers/github");
-}
-async function getRss() {
-  return import("./scrapers/rss");
-}
+async function getReddit()     { return import("./scrapers/reddit"); }
+async function getHn()         { return import("./scrapers/hn"); }
+async function getGithub()     { return import("./scrapers/github"); }
+async function getRss()        { return import("./scrapers/rss"); }
+async function getYoutube()    { return import("./scrapers/youtube"); }
+// webpackIgnore: these scrapers use spawnSync with dynamic paths (bird-search, patchright) - Turbopack must not bundle them
+async function getX()          { return import(/* webpackIgnore: true */ "./scrapers/x"); }
+async function getInstagram()  { return import(/* webpackIgnore: true */ "./scrapers/instagram"); }
+async function getPolymarket() { return import(/* webpackIgnore: true */ "./scrapers/polymarket"); }
+async function getWeb()       { return import("./scrapers/web"); }
+
+// ─── All search-capable platforms ────────────────────────────────────────────
+
+const ALL_SEARCH_SOURCES: Platform[] = ["reddit", "hn", "github", "rss", "youtube", "x", "instagram", "polymarket", "web"];
 
 // ─── Tool: search_topic ───────────────────────────────────────────────────────
 
@@ -35,28 +37,43 @@ async function runSearchTopic(
   const runId = crypto.randomUUID();
   saveRun(runId, query);
 
-  const activeReddit = sources.includes("reddit");
-  const activeHn = sources.includes("hn");
-  const activeGithub = sources.includes("github");
-  const activeRss = sources.includes("rss");
-
   const scraperList: Array<{ name: string; fn: () => Promise<any[]> }> = [];
 
-  if (activeReddit) {
-    const reddit = await getReddit();
-    scraperList.push({ name: "reddit", fn: () => reddit.searchReddit(query, 25) });
+  if (sources.includes("reddit")) {
+    const m = await getReddit();
+    scraperList.push({ name: "reddit", fn: () => m.searchReddit(query, 25) });
   }
-  if (activeHn) {
-    const hn = await getHn();
-    scraperList.push({ name: "hn", fn: () => hn.getHnByDate(query, timeframeDays, 20) });
+  if (sources.includes("hn")) {
+    const m = await getHn();
+    scraperList.push({ name: "hn", fn: () => m.getHnByDate(query, timeframeDays, 20) });
   }
-  if (activeGithub) {
-    const github = await getGithub();
-    scraperList.push({ name: "github", fn: () => github.searchGithub(query, 15) });
+  if (sources.includes("github")) {
+    const m = await getGithub();
+    scraperList.push({ name: "github", fn: () => m.searchGithub(query, 15) });
   }
-  if (activeRss) {
-    const rss = await getRss();
-    scraperList.push({ name: "rss", fn: () => rss.fetchAllFeeds(["ai_blog", "tech_news", "developer"]) });
+  if (sources.includes("rss")) {
+    const m = await getRss();
+    scraperList.push({ name: "rss", fn: () => m.fetchAllFeeds(["ai_blog", "tech_news", "developer"]) });
+  }
+  if (sources.includes("youtube")) {
+    const m = await getYoutube();
+    scraperList.push({ name: "youtube", fn: () => m.searchYoutube(query, 15) });
+  }
+  if (sources.includes("x")) {
+    const m = await getX();
+    scraperList.push({ name: "x", fn: () => m.searchX(query, 20) });
+  }
+  if (sources.includes("instagram")) {
+    const m = await getInstagram();
+    scraperList.push({ name: "instagram", fn: () => m.searchInstagram(query, 20) });
+  }
+  if (sources.includes("polymarket")) {
+    const m = await getPolymarket();
+    scraperList.push({ name: "polymarket", fn: () => m.searchPolymarket(query, 15) });
+  }
+  if (sources.includes("web") && WEB_SEARCH.enabled) {
+    const m = await getWeb();
+    scraperList.push({ name: "web", fn: () => m.searchWeb(query, 15) });
   }
 
   const results = await runScrapers(scraperList);
@@ -95,7 +112,54 @@ async function runSearchTopic(
 // ─── Tool: get_trending ───────────────────────────────────────────────────────
 
 export async function runGetTrending(niche: string, timeframeDays: number, limit: number) {
-  return runSearchTopic(niche, ["reddit", "hn", "github", "rss"], timeframeDays, limit);
+  return runSearchTopic(niche, ["reddit", "hn", "github", "rss", "youtube", "x", "polymarket", "web"], timeframeDays, limit);
+}
+
+// ─── Tool: scrape_platform ────────────────────────────────────────────────────
+
+async function runScrapePlatform(
+  platform: Platform,
+  inputType: "profile" | "hashtag" | "channel" | "search",
+  value: string,
+  limit: number
+): Promise<RawItem[]> {
+  switch (platform) {
+    case "youtube": {
+      const m = await getYoutube();
+      if (inputType === "channel") return m.getYoutubeChannelVideos(value, limit);
+      return m.searchYoutube(value, limit);
+    }
+    case "x": {
+      const m = await getX();
+      return m.searchX(value, limit);
+    }
+    case "instagram": {
+      const m = await getInstagram();
+      return m.searchInstagram(value, limit);
+    }
+    case "polymarket": {
+      const m = await getPolymarket();
+      return m.searchPolymarket(value, limit);
+    }
+    case "web": {
+      const m = await getWeb();
+      return m.searchWeb(value, limit);
+    }
+    case "reddit": {
+      const m = await getReddit();
+      return m.searchReddit(value, limit);
+    }
+    case "hn": {
+      const m = await getHn();
+      return m.getHnByDate(value, 30, limit);
+    }
+    case "github": {
+      const m = await getGithub();
+      return m.searchGithub(value, limit);
+    }
+    default:
+      throw new Error(`scrape_platform: unsupported platform "${platform}"`);
+  }
 }
 
 // ─── Tool: scrape_own_profiles ────────────────────────────────────────────────
@@ -103,19 +167,53 @@ export async function runGetTrending(niche: string, timeframeDays: number, limit
 async function runScrapeOwnProfiles(platforms: Platform[]) {
   const results: any[] = [];
 
+  const scrapeOne = async (platform: Platform, handle: string, fn: () => Promise<any>) => {
+    try {
+      const snapshot = await fn();
+      saveProfileSnapshot(snapshot);
+      results.push({ platform, status: "ok", snapshot });
+    } catch (err) {
+      results.push({ platform, status: "error", error: (err as Error).message });
+    }
+  };
+
   if (platforms.includes("reddit")) {
-    const handle = process.env.SCOUT_REDDIT_HANDLE;
+    const handle = OWN_HANDLES.reddit;
     if (handle) {
-      try {
-        const reddit = await getReddit();
-        const snapshot = await reddit.scrapeOwnProfile(handle);
-        saveProfileSnapshot(snapshot);
-        results.push({ platform: "reddit", status: "ok", followers: snapshot.followers });
-      } catch (err) {
-        results.push({ platform: "reddit", status: "error", error: (err as Error).message });
-      }
+      const m = await getReddit();
+      await scrapeOne("reddit", handle, () => m.scrapeOwnProfile(handle));
     } else {
       results.push({ platform: "reddit", status: "skipped", reason: "SCOUT_REDDIT_HANDLE not set" });
+    }
+  }
+
+  if (platforms.includes("youtube")) {
+    const handle = OWN_HANDLES.youtube;
+    if (handle) {
+      const m = await getYoutube();
+      await scrapeOne("youtube", handle, () => m.scrapeYoutubeProfile(handle));
+    } else {
+      results.push({ platform: "youtube", status: "skipped", reason: "SCOUT_YOUTUBE_HANDLE not set" });
+    }
+  }
+
+  if (platforms.includes("x")) {
+    const handle = OWN_HANDLES.x;
+    if (handle) {
+      const m = await getX();
+      await scrapeOne("x", handle, () => m.scrapeXProfile(handle));
+    } else {
+      results.push({ platform: "x", status: "skipped", reason: "SCOUT_X_HANDLE not set or SCOUT_X_AUTH_TOKEN missing" });
+    }
+  }
+
+  if (platforms.includes("instagram")) {
+    const handle = OWN_HANDLES.instagram;
+    if (handle) {
+      const m = await getInstagram();
+      await scrapeOne("instagram", handle, () => m.scrapeInstagramProfile(handle));
+    } else {
+      results.push({ platform: "instagram", status: "skipped", reason: "SCOUT_IG_HANDLE not set" });
     }
   }
 
@@ -130,34 +228,44 @@ async function runFtsSearch(q: string, limit: number) {
 
 // ─── Tool: raw_scrape ─────────────────────────────────────────────────────────
 
-async function runRawScrape(
-  query: string,
-  sources: Platform[],
-  timeframeDays: number,
-  limit: number
-) {
-  const activeReddit = sources.includes("reddit");
-  const activeHn = sources.includes("hn");
-  const activeGithub = sources.includes("github");
-  const activeRss = sources.includes("rss");
-
+async function runRawScrape(query: string, sources: Platform[], timeframeDays: number, limit: number) {
   const scraperList: Array<{ name: string; fn: () => Promise<any[]> }> = [];
 
-  if (activeReddit) {
-    const reddit = await getReddit();
-    scraperList.push({ name: "reddit", fn: () => reddit.searchReddit(query, limit) });
+  if (sources.includes("reddit")) {
+    const m = await getReddit();
+    scraperList.push({ name: "reddit", fn: () => m.searchReddit(query, limit) });
   }
-  if (activeHn) {
-    const hn = await getHn();
-    scraperList.push({ name: "hn", fn: () => hn.getHnByDate(query, timeframeDays, limit) });
+  if (sources.includes("hn")) {
+    const m = await getHn();
+    scraperList.push({ name: "hn", fn: () => m.getHnByDate(query, timeframeDays, limit) });
   }
-  if (activeGithub) {
-    const github = await getGithub();
-    scraperList.push({ name: "github", fn: () => github.searchGithub(query, limit) });
+  if (sources.includes("github")) {
+    const m = await getGithub();
+    scraperList.push({ name: "github", fn: () => m.searchGithub(query, limit) });
   }
-  if (activeRss) {
-    const rss = await getRss();
-    scraperList.push({ name: "rss", fn: () => rss.fetchAllFeeds() });
+  if (sources.includes("rss")) {
+    const m = await getRss();
+    scraperList.push({ name: "rss", fn: () => m.fetchAllFeeds() });
+  }
+  if (sources.includes("youtube")) {
+    const m = await getYoutube();
+    scraperList.push({ name: "youtube", fn: () => m.searchYoutube(query, limit) });
+  }
+  if (sources.includes("x")) {
+    const m = await getX();
+    scraperList.push({ name: "x", fn: () => m.searchX(query, limit) });
+  }
+  if (sources.includes("instagram")) {
+    const m = await getInstagram();
+    scraperList.push({ name: "instagram", fn: () => m.searchInstagram(query, limit) });
+  }
+  if (sources.includes("polymarket")) {
+    const m = await getPolymarket();
+    scraperList.push({ name: "polymarket", fn: () => m.searchPolymarket(query, limit) });
+  }
+  if (sources.includes("web") && WEB_SEARCH.enabled) {
+    const m = await getWeb();
+    scraperList.push({ name: "web", fn: () => m.searchWeb(query, limit) });
   }
 
   const results = await runScrapers(scraperList);
@@ -167,13 +275,7 @@ async function runRawScrape(
     perSource[name] = items.slice(0, limit);
     totalItems += perSource[name].length;
   }
-
-  return {
-    query,
-    sources: perSource,
-    totalItems,
-    fetchedAt: new Date().toISOString(),
-  };
+  return { query, sources: perSource, totalItems, fetchedAt: new Date().toISOString() };
 }
 
 // ─── Tool: score_and_rank ─────────────────────────────────────────────────────
@@ -197,40 +299,35 @@ async function runAnalyzeVideo(urls: string[]) {
   return analyzeVideos(urls);
 }
 
+// ─── Platform enum (shared across MCP tool schemas) ──────────────────────────
+
+const PLATFORM_ENUM = z.enum(["reddit", "hn", "github", "rss", "youtube", "x", "instagram", "polymarket", "web"]);
+
 // ─── Register all Scout tools on the MCP server ───────────────────────────────
 
 export function registerScoutTools(mcpServer: McpServer) {
   mcpServer.tool(
     "search_topic",
-    "Scout: Search a topic across Reddit, HN, GitHub, and RSS feeds. Returns RRF-fused ranked results.",
+    "Scout: Search a topic across Reddit, HN, GitHub, RSS, YouTube, X, Instagram, and Polymarket. Returns RRF-fused ranked results.",
     {
       query: z.string().describe("Topic or keyword to search"),
       sources: z
-        .array(z.enum(["reddit", "hn", "github", "rss", "youtube"]))
+        .array(PLATFORM_ENUM)
         .optional()
         .default(["reddit", "hn", "github", "rss"])
-        .describe("Sources to include"),
-      timeframe_days: z
-        .number()
-        .optional()
-        .default(7)
-        .describe("Look-back window in days"),
+        .describe("Sources to include (default: reddit+hn+github+rss). Add youtube, x, instagram, polymarket as needed."),
+      timeframe_days: z.number().optional().default(7).describe("Look-back window in days"),
       limit: z.number().optional().default(20).describe("Max results to return"),
     },
     async ({ query, sources, timeframe_days, limit }) => {
-      const report = await runSearchTopic(
-        query,
-        sources as Platform[],
-        timeframe_days,
-        limit
-      );
+      const report = await runSearchTopic(query, sources as Platform[], timeframe_days, limit);
       return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
     }
   );
 
   mcpServer.tool(
     "get_trending",
-    "Scout: Get trending content for a niche across all sources in the past N days.",
+    "Scout: Get trending content for a niche across Reddit, HN, GitHub, RSS, YouTube, X, and Polymarket in the past N days.",
     {
       niche: z.string().describe("Niche or topic e.g. 'AI agents', 'SaaS', 'Next.js'"),
       timeframe_days: z.number().optional().default(7).describe("Days to look back"),
@@ -243,8 +340,23 @@ export function registerScoutTools(mcpServer: McpServer) {
   );
 
   mcpServer.tool(
+    "scrape_platform",
+    "Scout: Targeted scrape of a single platform - profile, hashtag, channel, or keyword search. Returns raw SourceItems without RRF fusion.",
+    {
+      platform: PLATFORM_ENUM.describe("Platform to scrape"),
+      type: z.enum(["profile", "hashtag", "channel", "search"]).describe("What to scrape"),
+      value: z.string().describe("Username, hashtag, channel URL, or search query"),
+      limit: z.number().optional().default(20).describe("Max results"),
+    },
+    async ({ platform, type, value, limit }) => {
+      const items = await runScrapePlatform(platform as Platform, type, value, limit);
+      return { content: [{ type: "text", text: JSON.stringify(items, null, 2) }] };
+    }
+  );
+
+  mcpServer.tool(
     "scrape_own_profiles",
-    "Scout: Scrape own social profiles for follower count, recent posts, and performance stats.",
+    "Scout: Scrape own social profiles (Reddit, YouTube, X, Instagram) for follower count, recent posts, and engagement stats. Called by Pathrix PROFILE_SYNC cron every 3 hours.",
     {
       platforms: z
         .array(z.enum(["reddit", "youtube", "x", "instagram"]))
@@ -280,6 +392,89 @@ export function registerScoutTools(mcpServer: McpServer) {
   );
 
   mcpServer.tool(
+    "get_scout_status",
+    "Scout: Returns configured handles, last-scraped timestamps per platform, item count in local DB, and stored snapshot summaries. Use this to understand what Scout knows and when it last ran - no scripting needed.",
+    {},
+    async () => {
+      const handles = {
+        reddit: OWN_HANDLES.reddit ?? null,
+        youtube: OWN_HANDLES.youtube ?? null,
+        x: OWN_HANDLES.x ?? null,
+        instagram: OWN_HANDLES.instagram ?? null,
+      };
+      const platforms = ["reddit", "youtube", "x", "instagram"] as const;
+      const snapshots: Record<string, any> = {};
+      for (const p of platforms) {
+        const snap = getLatestProfileSnapshot(p);
+        snapshots[p] = snap
+          ? { handle: snap.handle, fetchedAt: snap.fetchedAt, followers: snap.followers, postsCount: snap.posts?.length ?? 0, hasBanner: !!snap.bannerUrl, hasAvatar: !!snap.avatarUrl, pendingThreads: snap.pendingThreads?.length ?? 0 }
+          : null;
+      }
+      const recentItems = getRecentItems(5);
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ handles, snapshots, recentScoutItems: recentItems.length > 0 ? `${recentItems.length} recent items, latest: "${recentItems[0]?.title?.slice(0,60)}"` : "none" }, null, 2),
+        }],
+      };
+    }
+  );
+
+  mcpServer.tool(
+    "check_pending_threads",
+    "Scout: Run a live Reddit profile scrape and return any open threads where someone replied to your comments. Surfaces urgent replies needing a response.",
+    {
+      platform: z.enum(["reddit"]).describe("Platform to check (currently only reddit)"),
+    },
+    async ({ platform }) => {
+      if (platform !== "reddit") {
+        return { content: [{ type: "text", text: "Only Reddit is supported currently." }] };
+      }
+      const handle = OWN_HANDLES.reddit;
+      if (!handle) {
+        return { content: [{ type: "text", text: "No Reddit handle configured. Call configureHandles({ reddit: 'yourhandle' }) first." }] };
+      }
+      const { scrapeOwnProfile } = await import("./scrapers/reddit");
+      const snapshot = await scrapeOwnProfile(handle);
+      saveProfileSnapshot(snapshot);
+
+      const threads = snapshot.pendingThreads ?? [];
+      if (threads.length === 0) {
+        return { content: [{ type: "text", text: "No open threads - inbox is clear." }] };
+      }
+
+      const lines = threads.map((t) =>
+        `[${t.isUrgent ? "URGENT" : "PENDING"}] r/${t.subreddit} - "${t.postTitle.slice(0, 60)}"\n` +
+        `  My comment: "${t.myCommentBody.slice(0, 100)}..."\n` +
+        `  Reply from u/${t.latestReply.author} (${t.latestReply.publishedAt.slice(0, 10)}): "${t.latestReply.body.slice(0, 150)}..."\n` +
+        `  Reply link: ${t.latestReply.url}\n` +
+        `  My comment link: ${t.myCommentUrl}`
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${threads.length} open thread(s) found:\n\n${lines.join("\n\n")}`,
+          },
+        ],
+      };
+    }
+  );
+
+  mcpServer.tool(
+    "resolve_thread",
+    "Scout: Mark a Reddit comment thread as resolved so it no longer appears as pending. Call this after replying or deciding not to reply.",
+    {
+      platform: z.enum(["reddit"]).describe("Platform"),
+      comment_id: z.string().describe("The comment ID to resolve, e.g. t1_abc123"),
+    },
+    async ({ platform, comment_id }) => {
+      resolveThread(platform, comment_id);
+      return { content: [{ type: "text", text: `Thread ${comment_id} on ${platform} marked as resolved.` }] };
+    }
+  );
+
+  mcpServer.tool(
     "scout_search",
     "Scout: Full-text search over previously fetched Scout items stored in local SQLite.",
     {
@@ -298,7 +493,7 @@ export function registerScoutTools(mcpServer: McpServer) {
     {
       query: z.string().describe("Topic or keyword to search"),
       sources: z
-        .array(z.enum(["reddit", "hn", "github", "rss"]))
+        .array(PLATFORM_ENUM)
         .optional()
         .default(["reddit", "hn", "github", "rss"])
         .describe("Sources to scrape"),
@@ -313,7 +508,7 @@ export function registerScoutTools(mcpServer: McpServer) {
 
   mcpServer.tool(
     "score_and_rank",
-    "Scout: Run the intelligence layer (scoring + RRF fusion) on items you already have. Useful when you scraped raw data and want to rank it.",
+    "Scout: Run the intelligence layer (scoring + RRF fusion) on items you already have.",
     {
       items: z
         .array(
@@ -345,9 +540,7 @@ export function registerScoutTools(mcpServer: McpServer) {
     "analyze_video",
     "Scout: Download and transcribe one or more public videos (YouTube, Instagram, any yt-dlp-supported URL). Returns transcript + metadata.",
     {
-      urls: z
-        .array(z.string().url())
-        .describe("One or more video URLs to analyze"),
+      urls: z.array(z.string().url()).describe("One or more video URLs to analyze"),
     },
     async ({ urls }) => {
       const results = await runAnalyzeVideo(urls);

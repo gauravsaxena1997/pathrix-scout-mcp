@@ -1,5 +1,5 @@
 {
-  "name": "pathrix-scout",
+  "name": "@pathrix/scout",
   "version": "1.0.0",
   "description": "Zero-cost, self-hosted intelligence layer for Claude. Scrapes Reddit, HN, GitHub, and 16+ RSS feeds, fuses results with RRF ranking, and exposes everything as MCP tools.",
   "type": "module",

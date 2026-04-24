@@ -6,7 +6,11 @@ export type Platform =
   | "x"
   | "youtube"
   | "instagram"
-  | "upwork";
+  | "polymarket"
+  | "web"
+  | "linkedin"
+  | "upwork"
+  | "fiverr";
 
 export type TargetType =
   | "SOCIAL_MEDIA"
@@ -59,6 +63,29 @@ export interface ProfilePost {
   shares?: number;
   views?: number;
   isViral: boolean;
+  // Rich media
+  imageUrl?: string;
+  // Reddit-specific
+  subreddit?: string;
+  isComment?: boolean;
+  commentPermalink?: string;
+}
+
+export interface OpenThread {
+  myCommentId: string;
+  myCommentBody: string;
+  myCommentUrl: string;
+  postTitle: string;
+  postUrl: string;
+  subreddit: string;
+  latestReply: {
+    author: string;
+    body: string;
+    publishedAt: string;
+    url: string;
+  };
+  totalReplies: number;
+  isUrgent: boolean;
 }
 
 export interface ProfileSnapshot {
@@ -67,7 +94,11 @@ export interface ProfileSnapshot {
   fetchedAt: string;
   followers: number;
   posts: ProfilePost[];
-  stats: Record<string, number>;
+  stats: Record<string, number | string>;
+  avatarUrl?: string;
+  bannerUrl?: string;
+  displayName?: string;
+  pendingThreads?: OpenThread[];
 }
 
 export interface Cluster {

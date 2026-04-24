@@ -4,6 +4,18 @@ export const SCOUT_UA = "pathrix-scout/1.0 (personal career OS)";
 
 // ─── Own profile handles ───────────────────────────────────────────────────────
 
+// ─── Web search backends (optional) ──────────────────────────────────────────
+// Set SCOUT_SEARXNG_URL for self-hosted (SearXNG in Docker) or SCOUT_BRAVE_API_KEY for managed.
+// If both are set, SearXNG takes priority (zero cost, fully local).
+// If neither is set, the "web" source is skipped gracefully - no errors, no impact on other sources.
+export const WEB_SEARCH = {
+  searxngUrl: process.env.SCOUT_SEARXNG_URL ?? "",
+  braveApiKey: process.env.SCOUT_BRAVE_API_KEY ?? "",
+  get enabled() { return !!(this.searxngUrl || this.braveApiKey); },
+};
+
+// ─── Own profile handles ───────────────────────────────────────────────────────
+
 export const OWN_HANDLES: Partial<Record<Platform, string>> = {
   reddit: process.env.SCOUT_REDDIT_HANDLE ?? "",
   youtube: process.env.SCOUT_YOUTUBE_HANDLE ?? "",
@@ -101,6 +113,11 @@ export const MAX_CONCURRENT = 8;
 export const SOURCE_QUALITY: Record<string, number> = {
   hn: 0.80,
   github: 0.75,
+  youtube: 0.75,
   rss: 0.65,
+  web: 0.65,
   reddit: 0.60,
+  x: 0.60,
+  instagram: 0.55,
+  polymarket: 0.70,
 };

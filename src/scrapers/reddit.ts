@@ -1,6 +1,6 @@
 import { SCOUT_UA, FETCH_TIMEOUT_MS, DEFAULT_SUBREDDITS } from "../config";
-import { urlToId } from "../store/db";
-import type { RawItem, ProfileSnapshot } from "../schema";
+import { urlToId, isThreadResolved } from "../store/db";
+import type { RawItem, ProfileSnapshot, OpenThread } from "../schema";
 import { scoreItem } from "../intelligence/score";
 
 const BASE = "https://old.reddit.com";
@@ -72,36 +72,142 @@ export async function getHotPosts(subreddit: string, limit = 10): Promise<RawIte
   return children.map(mapPost).filter(Boolean) as RawItem[];
 }
 
+async function fetchOpenThreads(handle: string, recentComments: any[]): Promise<OpenThread[]> {
+  const cutoff = Date.now() - 14 * 86_400_000;
+  const candidates = recentComments
+    .filter((c) => {
+      const ts = c?.data?.created_utc;
+      return ts && ts * 1000 > cutoff;
+    })
+    .slice(0, 5);
+
+  const threads: OpenThread[] = [];
+  for (const c of candidates) {
+    const d = c?.data;
+    if (!d) continue;
+    const postId = (d.link_id ?? "").replace("t3_", "");
+    const commentId = d.id ?? "";
+    const subreddit = d.subreddit ?? "";
+    if (!postId || !commentId || !subreddit) continue;
+    if (isThreadResolved("reddit", `t1_${commentId}`)) continue;
+
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      const url = `${BASE}/r/${subreddit}/comments/${postId}/_/${commentId}.json?limit=10&depth=2`;
+      const data = await redditFetch(url);
+      const replies: any[] = data?.[1]?.data?.children?.[0]?.data?.replies?.data?.children ?? [];
+      const otherReplies = replies.filter(
+        (r) => r?.data?.author && r.data.author !== handle && r.kind !== "more"
+      );
+      if (otherReplies.length === 0) continue;
+
+      otherReplies.sort((a, b) => (b.data.created_utc ?? 0) - (a.data.created_utc ?? 0));
+      const latest = otherReplies[0].data;
+      const myPermalink = d.permalink?.startsWith("http")
+        ? d.permalink
+        : `https://reddit.com${d.permalink ?? ""}`;
+      const replyPermalink = latest.permalink?.startsWith("http")
+        ? latest.permalink
+        : `https://reddit.com${latest.permalink ?? ""}`;
+
+      threads.push({
+        myCommentId: `t1_${commentId}`,
+        myCommentBody: (d.body ?? "").slice(0, 200),
+        myCommentUrl: myPermalink,
+        postTitle: d.link_title ?? subreddit,
+        postUrl: d.link_permalink?.startsWith("http")
+          ? d.link_permalink
+          : `https://reddit.com${d.link_permalink ?? ""}`,
+        subreddit,
+        latestReply: {
+          author: latest.author ?? "",
+          body: (latest.body ?? "").slice(0, 300),
+          publishedAt: latest.created_utc
+            ? new Date(latest.created_utc * 1000).toISOString()
+            : "",
+          url: replyPermalink,
+        },
+        totalReplies: otherReplies.length,
+        isUrgent: latest.created_utc
+          ? Date.now() - latest.created_utc * 1000 < 86_400_000
+          : false,
+      });
+    } catch {
+      // skip - don't let one failure stop the rest
+    }
+  }
+  return threads;
+}
+
 export async function scrapeOwnProfile(handle: string): Promise<ProfileSnapshot> {
-  const [about, submitted] = await Promise.all([
+  const [about, submitted, comments] = await Promise.all([
     redditFetch(`${BASE}/user/${encodeURIComponent(handle)}/about.json`),
-    redditFetch(`${BASE}/user/${encodeURIComponent(handle)}/submitted.json?limit=25&sort=new`),
+    redditFetch(`${BASE}/user/${encodeURIComponent(handle)}/submitted.json?limit=15&sort=new`),
+    redditFetch(`${BASE}/user/${encodeURIComponent(handle)}/comments.json?limit=10&sort=new`).catch(() => null),
   ]);
 
   const d = about?.data ?? {};
-  const posts = (submitted?.data?.children ?? [])
+
+  const cleanUrl = (u: string) => u?.split("?")?.[0] ?? u;
+  const avatarUrl = cleanUrl(d.icon_img ?? d.snoovatar_img ?? "");
+  const bannerUrl = cleanUrl(d.banner_img ?? d.banner_background_image ?? "");
+
+  const postItems = (submitted?.data?.children ?? [])
     .map((c: any) => {
       const p = c?.data;
       if (!p) return null;
       const url = p.url?.startsWith("http") ? p.url : `https://reddit.com${p.url ?? ""}`;
       return {
-        id: p.id ?? urlToId(url),
+        id: `post_${p.id ?? urlToId(url)}`,
         url,
         content: p.title ?? "",
         publishedAt: p.created_utc ? new Date(p.created_utc * 1000).toISOString() : "",
         likes: p.score ?? 0,
         comments: p.num_comments ?? 0,
         isViral: (p.score ?? 0) > 1000,
+        subreddit: p.subreddit ?? "",
+        isComment: false,
       };
     })
     .filter(Boolean);
+
+  const commentItems = (comments?.data?.children ?? [])
+    .map((c: any) => {
+      const p = c?.data;
+      if (!p) return null;
+      const postUrl = p.link_permalink?.startsWith("http")
+        ? p.link_permalink
+        : `https://reddit.com${p.link_permalink ?? ""}`;
+      const commentUrl = p.permalink?.startsWith("http")
+        ? p.permalink
+        : `https://reddit.com${p.permalink ?? ""}`;
+      return {
+        id: `comment_${p.id}`,
+        url: postUrl,
+        content: (p.body ?? "").slice(0, 300),
+        publishedAt: p.created_utc ? new Date(p.created_utc * 1000).toISOString() : "",
+        likes: p.score ?? 0,
+        comments: 0,
+        isViral: (p.score ?? 0) > 100,
+        subreddit: p.subreddit ?? "",
+        isComment: true,
+        commentPermalink: commentUrl,
+      };
+    })
+    .filter(Boolean);
+
+  const rawComments = comments?.data?.children ?? [];
+  const pendingThreads = await fetchOpenThreads(handle, rawComments);
 
   return {
     platform: "reddit",
     handle,
     fetchedAt: new Date().toISOString(),
     followers: typeof d.num_followers === "number" ? d.num_followers : 0,
-    posts,
+    avatarUrl: avatarUrl || undefined,
+    bannerUrl: bannerUrl || undefined,
+    displayName: d.subreddit?.title || handle,
+    posts: [...postItems, ...commentItems] as ProfileSnapshot["posts"],
     stats: {
       post_karma: d.link_karma ?? 0,
       comment_karma: d.comment_karma ?? 0,
@@ -110,5 +216,6 @@ export async function scrapeOwnProfile(handle: string): Promise<ProfileSnapshot>
         ? Math.floor((Date.now() - d.created_utc * 1000) / 86400000)
         : 0,
     },
+    pendingThreads,
   };
 }
