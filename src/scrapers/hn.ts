@@ -17,6 +17,7 @@ async function hnFetch(url: string) {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- HN Algolia API hit object shape is external; no published TypeScript types
 function mapHit(hit: any): RawItem | null {
   const url = hit.url ?? `https://news.ycombinator.com/item?id=${hit.objectID}`;
   if (!url) return null;

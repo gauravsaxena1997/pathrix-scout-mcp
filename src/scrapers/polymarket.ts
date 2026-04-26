@@ -19,6 +19,7 @@ async function polyFetch(url: string) {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Polymarket API market object shape is external; no published TypeScript types
 function mapMarket(m: any): RawItem | null {
   if (!m?.question) return null;
   const url = m.url || `https://polymarket.com/event/${m.slug || m.id}`;
@@ -49,6 +50,7 @@ function mapMarket(m: any): RawItem | null {
 export async function searchPolymarket(query: string, limit = 20): Promise<RawItem[]> {
   const params = new URLSearchParams({ q: query, limit: String(Math.min(limit, 50)) });
   const data = await polyFetch(`${GAMMA_API}/markets?${params}`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Polymarket API markets array element shape is external API response
   const markets: any[] = Array.isArray(data) ? data : data?.markets ?? [];
   return markets.flatMap((m) => mapMarket(m) ?? []).slice(0, limit);
 }
@@ -61,6 +63,7 @@ export async function getTrendingPolymarket(limit = 20): Promise<RawItem[]> {
     limit: String(Math.min(limit, 50)),
   });
   const data = await polyFetch(`${GAMMA_API}/markets?${params}`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Polymarket API markets array element shape is external API response
   const markets: any[] = Array.isArray(data) ? data : data?.markets ?? [];
   return markets.flatMap((m) => mapMarket(m) ?? []).slice(0, limit);
 }

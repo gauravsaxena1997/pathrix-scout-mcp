@@ -22,6 +22,7 @@ async function redditFetch(url: string) {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reddit API child object shape is external; no published TypeScript types
 function mapPost(child: any): RawItem | null {
   const d = child?.data;
   if (!d || !d.url) return null;
@@ -72,6 +73,7 @@ export async function getHotPosts(subreddit: string, limit = 10): Promise<RawIte
   return children.map(mapPost).filter(Boolean) as RawItem[];
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reddit API comment objects are external; shape unknown at compile time
 async function fetchOpenThreads(handle: string, recentComments: any[]): Promise<OpenThread[]> {
   const cutoff = Date.now() - 14 * 86_400_000;
   const candidates = recentComments
@@ -95,6 +97,7 @@ async function fetchOpenThreads(handle: string, recentComments: any[]): Promise<
       await new Promise((r) => setTimeout(r, 300));
       const url = `${BASE}/r/${subreddit}/comments/${postId}/_/${commentId}.json?limit=10&depth=2`;
       const data = await redditFetch(url);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reddit thread JSON nests deeply; reply child shape is external API response
       const replies: any[] = data?.[1]?.data?.children?.[0]?.data?.replies?.data?.children ?? [];
       const otherReplies = replies.filter(
         (r) => r?.data?.author && r.data.author !== handle && r.kind !== "more"
@@ -153,6 +156,7 @@ export async function scrapeOwnProfile(handle: string): Promise<ProfileSnapshot>
   const bannerUrl = cleanUrl(d.banner_img ?? d.banner_background_image ?? "");
 
   const postItems = (submitted?.data?.children ?? [])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reddit submitted post child object is external API response
     .map((c: any) => {
       const p = c?.data;
       if (!p) return null;
@@ -172,6 +176,7 @@ export async function scrapeOwnProfile(handle: string): Promise<ProfileSnapshot>
     .filter(Boolean);
 
   const commentItems = (comments?.data?.children ?? [])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reddit comment child object is external API response
     .map((c: any) => {
       const p = c?.data;
       if (!p) return null;

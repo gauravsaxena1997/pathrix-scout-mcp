@@ -7,6 +7,7 @@ import type { RawItem, ProfileSnapshot } from "../schema";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIRD_MJS = path.join(__dirname, "../vendor/bird-search/bird-search.mjs");
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- bird-search MJS output is a runtime JSON blob; tweet shape unknown at compile time
 function birdSearch(query: string, count: number): any[] {
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (process.env.SCOUT_X_AUTH_TOKEN) env["AUTH_TOKEN"] = process.env.SCOUT_X_AUTH_TOKEN;
@@ -30,7 +31,8 @@ function birdSearch(query: string, count: number): any[] {
   }
 }
 
-function mapTweet(tweet: any, idx: number): RawItem | null {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- X/Twitter tweet object from bird-search; shape unknown at compile time
+function mapTweet(tweet: any, _idx: number): RawItem | null {
   const author = tweet.author ?? tweet.user ?? {};
   const handle = author.username ?? author.screen_name ?? "";
   const tweetId = tweet.id ?? tweet.id_str ?? "";

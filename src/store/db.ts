@@ -161,31 +161,33 @@ export function saveProfileSnapshot(snapshot: ProfileSnapshot) {
 
 export function searchItems(q: string, limit = 20): RawItem[] {
   const db = getDb();
-  const rows = db.prepare(`
+  const stmt = db.prepare(`
     SELECT i.* FROM items_fts
     JOIN items i ON items_fts.rowid = i.rowid
     WHERE items_fts MATCH ?
     ORDER BY rank
     LIMIT ?
-  `).all(q + "*", limit) as any[];
-
+  `);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SQLite raw row shape varies at runtime; normalized via rowToItem
+  const rows = stmt.all(q + "*", limit) as any[];
   return rows.map(rowToItem);
 }
 
 export function getRecentItems(limit = 50): RawItem[] {
   const db = getDb();
-  const rows = db.prepare(
-    `SELECT * FROM items ORDER BY created_at DESC LIMIT ?`
-  ).all(limit) as any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SQLite raw row shape varies at runtime; normalized via rowToItem
+  const rows = db.prepare(`SELECT * FROM items ORDER BY created_at DESC LIMIT ?`).all(limit) as any[];
   return rows.map(rowToItem);
 }
 
 export function getLatestProfileSnapshot(platform: string): ProfileSnapshot | null {
   const db = getDb();
-  const row = db.prepare(`
+  const snapshotStmt = db.prepare(`
     SELECT * FROM profile_snapshots WHERE platform = ?
     ORDER BY fetched_at DESC LIMIT 1
-  `).get(platform) as any;
+  `);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SQLite raw snapshot row shape varies at runtime; fields accessed by column name
+  const row = snapshotStmt.get(platform) as any;
   if (!row) return null;
   // Prefer full snapshot JSON if available (includes avatarUrl, bannerUrl, displayName, pendingThreads)
   if (row.data_json) {
@@ -214,6 +216,7 @@ export function isThreadResolved(platform: string, commentId: string): boolean {
   return !!row;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- SQLite raw row object shape varies at runtime; columns accessed by name
 function rowToItem(row: any): RawItem {
   return {
     id: row.id,

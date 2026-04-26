@@ -17,6 +17,7 @@ function getVenvPython(): string {
   return candidates.find((c) => fs.existsSync(c)) ?? "python3";
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Python script output is a runtime JSON blob; shape unknown at compile time
 function runScript(args: string[]): any {
   const python = getVenvPython();
   const env: NodeJS.ProcessEnv = {
@@ -38,6 +39,7 @@ function runScript(args: string[]): any {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Instagram scrape media object comes from Python script; shape unknown at compile time
 function mapMedia(m: any): RawItem | null {
   if (!m?.url) return null;
   return {
@@ -60,6 +62,7 @@ function mapMedia(m: any): RawItem | null {
 }
 
 export async function searchInstagram(query: string, limit = 20): Promise<RawItem[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Python script search result is a runtime JSON blob; shape unknown at compile time
   const raw = runScript(["search", query, "--limit", String(limit)]) as any;
   if (!Array.isArray(raw)) {
     if (raw?.error) throw new Error(`Instagram search: ${raw.error}`);
@@ -74,6 +77,7 @@ export async function scrapeInstagramProfile(handle: string): Promise<ProfileSna
 
   if (raw?.error) throw new Error(`Instagram profile: ${raw.error}`);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Instagram profile post object from Python script; shape unknown at compile time
   const posts = (raw.posts ?? []).map((p: any) => ({
     id: p.id ?? urlToId(p.url ?? ""),
     url: p.url ?? "",

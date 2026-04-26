@@ -24,7 +24,7 @@ async function getWeb()       { return import("./scrapers/web"); }
 
 // ─── All search-capable platforms ────────────────────────────────────────────
 
-const ALL_SEARCH_SOURCES: Platform[] = ["reddit", "hn", "github", "rss", "youtube", "x", "instagram", "polymarket", "web"];
+const _ALL_SEARCH_SOURCES: Platform[] = ["reddit", "hn", "github", "rss", "youtube", "x", "instagram", "polymarket", "web"];
 
 // ─── Tool: search_topic ───────────────────────────────────────────────────────
 
@@ -37,6 +37,7 @@ async function runSearchTopic(
   const runId = crypto.randomUUID();
   saveRun(runId, query);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- scraper return shapes vary by platform; unified only at RawItem boundary
   const scraperList: Array<{ name: string; fn: () => Promise<any[]> }> = [];
 
   if (sources.includes("reddit")) {
@@ -77,7 +78,9 @@ async function runSearchTopic(
   }
 
   const results = await runScrapers(scraperList);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- grouped map holds mixed scored items before RawItem normalization
   const grouped = new Map<string, any[]>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- allScored accumulates items across platforms before RawItem normalization
   const allScored: any[] = [];
   for (const { name, items } of results) {
     const scored = applyScores(items, query);
@@ -85,8 +88,10 @@ async function runSearchTopic(
     allScored.push(...scored);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- nearDedup returns mixed scored items; id is accessed dynamically
   const dedupedIds = new Set(nearDedup(allScored).map((i: any) => i.id));
   for (const [src, items] of grouped) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- filter over mixed scored items before RawItem normalization
     grouped.set(src, items.filter((i: any) => dedupedIds.has(i.id)));
   }
 
@@ -165,8 +170,10 @@ async function runScrapePlatform(
 // ─── Tool: scrape_own_profiles ────────────────────────────────────────────────
 
 async function runScrapeOwnProfiles(platforms: Platform[]) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- results hold mixed platform snapshot shapes; typed at ProfileSnapshot boundary per platform
   const results: any[] = [];
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- scraper fn returns platform-specific snapshot; shape unknown at call site
   const scrapeOne = async (platform: Platform, handle: string, fn: () => Promise<any>) => {
     try {
       const snapshot = await fn();
@@ -229,6 +236,7 @@ async function runFtsSearch(q: string, limit: number) {
 // ─── Tool: raw_scrape ─────────────────────────────────────────────────────────
 
 async function runRawScrape(query: string, sources: Platform[], timeframeDays: number, limit: number) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- scraper return shapes vary by platform; unified only at RawItem boundary
   const scraperList: Array<{ name: string; fn: () => Promise<any[]> }> = [];
 
   if (sources.includes("reddit")) {
@@ -269,6 +277,7 @@ async function runRawScrape(query: string, sources: Platform[], timeframeDays: n
   }
 
   const results = await runScrapers(scraperList);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- perSource holds raw per-platform results before RawItem normalization
   const perSource: Record<string, any[]> = {};
   let totalItems = 0;
   for (const { name, items } of results) {
@@ -403,6 +412,7 @@ export function registerScoutTools(mcpServer: McpServer) {
         instagram: OWN_HANDLES.instagram ?? null,
       };
       const platforms = ["reddit", "youtube", "x", "instagram"] as const;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- snapshots map holds mixed platform snapshot shapes keyed by platform string
       const snapshots: Record<string, any> = {};
       for (const p of platforms) {
         const snap = getLatestProfileSnapshot(p);

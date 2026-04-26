@@ -2,6 +2,7 @@ import { FETCH_TIMEOUT_MS, WEB_SEARCH } from "../config";
 import { urlToId } from "../store/db";
 import type { RawItem } from "../schema";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- external web search API response shape varies by provider; parsed defensively
 async function fetchJson(url: string, headers: Record<string, string> = {}): Promise<any> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -14,7 +15,8 @@ async function fetchJson(url: string, headers: Record<string, string> = {}): Pro
   }
 }
 
-function mapSearxResult(r: any, index: number): RawItem | null {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- SearXNG result object shape is external API response; no published TypeScript types
+function mapSearxResult(r: any, _index: number): RawItem | null {
   if (!r?.url || !r?.title) return null;
   return {
     id: urlToId(r.url),
@@ -29,6 +31,7 @@ function mapSearxResult(r: any, index: number): RawItem | null {
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Brave Search API result shape is external; no published TypeScript types
 function mapBraveResult(r: any): RawItem | null {
   if (!r?.url || !r?.title) return null;
   return {
@@ -47,6 +50,7 @@ function mapBraveResult(r: any): RawItem | null {
 async function searchSearXNG(query: string, limit: number): Promise<RawItem[]> {
   const params = new URLSearchParams({ q: query, format: "json" });
   const data = await fetchJson(`${WEB_SEARCH.searxngUrl}/search?${params}`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SearXNG results array element shape is external API response
   const results: any[] = Array.isArray(data?.results) ? data.results : [];
   return results
     .flatMap((r, i) => mapSearxResult(r, i) ?? [])
@@ -59,6 +63,7 @@ async function searchBrave(query: string, limit: number): Promise<RawItem[]> {
     `https://api.search.brave.com/res/v1/web/search?${params}`,
     { "X-Subscription-Token": WEB_SEARCH.braveApiKey, Accept: "application/json" }
   );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Brave Search API web results array element shape is external API response
   const results: any[] = data?.web?.results ?? [];
   return results
     .flatMap((r) => mapBraveResult(r) ?? [])

@@ -3,6 +3,7 @@ import { urlToId } from "../store/db";
 import type { RawItem } from "../schema";
 import { scoreItem } from "../intelligence/score";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- GitHub CLI JSON output shape varies by command; parsed defensively
 function runGh(args: string): any {
   try {
     const out = execSync(`gh ${args}`, {
@@ -11,6 +12,7 @@ function runGh(args: string): any {
       stdio: ["pipe", "pipe", "pipe"],
     });
     return JSON.parse(out);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- execSync error shape is node-specific; stderr/message accessed defensively
   } catch (err: any) {
     const msg: string = err?.stderr ?? err?.message ?? String(err);
     if (msg.includes("not logged") || msg.includes("auth")) {
@@ -20,6 +22,7 @@ function runGh(args: string): any {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- GitHub CLI repo JSON object shape is external; no published TypeScript types
 function mapRepo(repo: any): RawItem | null {
   const url = repo.url ?? repo.htmlUrl ?? repo.html_url;
   if (!url) return null;

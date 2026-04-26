@@ -18,6 +18,7 @@ function parseUploadDate(d: string | undefined): string {
   return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}T00:00:00Z`;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- yt-dlp JSON response shape is undocumented; fields accessed defensively
 function mapVideo(v: any): RawItem | null {
   if (!v?.webpage_url && !v?.url) return null;
   const url = v.webpage_url || `https://youtube.com/watch?v=${v.id}`;
@@ -50,6 +51,7 @@ export async function searchYoutube(query: string, limit = 20): Promise<RawItem[
   }
   try {
     const playlist = JSON.parse(raw);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- yt-dlp playlist entries have undocumented shape; mapped via mapVideo
     return (playlist?.entries ?? []).flatMap((v: any) => mapVideo(v) ?? []).slice(0, limit);
   } catch {
     return [];
@@ -65,6 +67,7 @@ export async function getYoutubeChannelVideos(channelUrl: string, limit = 10): P
   }
   try {
     const playlist = JSON.parse(raw);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- yt-dlp playlist entries have undocumented shape; mapped via mapVideo
     return (playlist?.entries ?? []).flatMap((v: any) => mapVideo(v) ?? []).slice(0, limit);
   } catch {
     return [];
@@ -79,6 +82,7 @@ export async function scrapeYoutubeProfile(handle: string): Promise<ProfileSnaps
   } catch {
     return { platform: "youtube", handle, fetchedAt: new Date().toISOString(), followers: 0, posts: [], stats: {} };
   }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- yt-dlp channel JSON has undocumented shape; fields accessed defensively
   let channel: any;
   try {
     channel = JSON.parse(raw);
@@ -86,6 +90,7 @@ export async function scrapeYoutubeProfile(handle: string): Promise<ProfileSnaps
     return { platform: "youtube", handle, fetchedAt: new Date().toISOString(), followers: 0, posts: [], stats: {} };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- yt-dlp entry objects have undocumented shape; fields accessed defensively
   const posts = (channel?.entries ?? []).slice(0, 10).map((v: any) => {
     const videoId = v.id ?? "";
     const thumbnailUrl = videoId
@@ -107,10 +112,12 @@ export async function scrapeYoutubeProfile(handle: string): Promise<ProfileSnaps
   });
 
   // Separate avatar (square) from banner (wide) using yt-dlp thumbnail ids
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- yt-dlp thumbnail objects have undocumented shape; url/width/height accessed defensively
   const channelThumbs: any[] = channel?.thumbnails ?? [];
   const httpThumbs = channelThumbs.filter((t) => t?.url?.startsWith("http"));
 
   // Prefer explicitly-sized thumbnails (avoid =s0 "uncropped" variants which are blocked)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- yt-dlp thumbnail object shape unknown at compile time
   const sizeDefined = (t: any) => (t.width ?? 0) > 0 && (t.height ?? 0) > 0;
   const squareThumbs = httpThumbs.filter(sizeDefined).filter((t) => Math.abs((t.width ?? 0) - (t.height ?? 0)) < 100);
   const wideThumbs = httpThumbs.filter(sizeDefined).filter((t) => (t.width ?? 0) > (t.height ?? 0) * 1.5);

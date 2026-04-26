@@ -34,7 +34,7 @@ function splitItems(xml: string): string[] {
 
 function parseItem(chunk: string, sourceName: string): RawItem | null {
   // Try <link> as tag first, then as href attribute (Atom)
-  let url =
+  const url =
     extractTag(chunk, "link") ||
     extractAttr(chunk, "link", "href") ||
     extractTag(chunk, "id");
