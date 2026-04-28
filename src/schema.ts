@@ -101,6 +101,16 @@ export interface ProfileSnapshot {
   pendingThreads?: OpenThread[];
 }
 
+export interface CommentSample {
+  id: string;
+  author?: string;
+  body: string;
+  score: number;
+  replyCount?: number;
+  upvoteRatio?: number;
+  url?: string;
+}
+
 export interface Cluster {
   label: string;
   items: string[];

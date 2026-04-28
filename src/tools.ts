@@ -22,10 +22,6 @@ async function getInstagram()  { return import(/* webpackIgnore: true */ "./scra
 async function getPolymarket() { return import(/* webpackIgnore: true */ "./scrapers/polymarket"); }
 async function getWeb()       { return import("./scrapers/web"); }
 
-// ─── All search-capable platforms ────────────────────────────────────────────
-
-const _ALL_SEARCH_SOURCES: Platform[] = ["reddit", "hn", "github", "rss", "youtube", "x", "instagram", "polymarket", "web"];
-
 // ─── Tool: search_topic ───────────────────────────────────────────────────────
 
 async function runSearchTopic(
@@ -555,6 +551,21 @@ export function registerScoutTools(mcpServer: McpServer) {
     async ({ urls }) => {
       const results = await runAnalyzeVideo(urls);
       return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    }
+  );
+
+  mcpServer.tool(
+    "get_reddit_comments",
+    "Scout: Fetch and flatten the comment tree for a Reddit post. Returns up to `limit` comments sorted by top, flattened from nested replies up to `depth` levels. Used by the Recon hydrator and the /run-recon-sweep slash command.",
+    {
+      post_url: z.string().url().describe("Full Reddit post URL (www or old.reddit.com)"),
+      limit: z.number().optional().default(20).describe("Max comments to fetch from Reddit API"),
+      depth: z.number().optional().default(2).describe("Reply tree depth to traverse"),
+    },
+    async ({ post_url, limit, depth }) => {
+      const { getComments } = await import("./scrapers/reddit");
+      const comments = await getComments(post_url, { limit, depth });
+      return { content: [{ type: "text", text: JSON.stringify(comments, null, 2) }] };
     }
   );
 }

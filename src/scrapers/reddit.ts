@@ -1,6 +1,6 @@
 import { SCOUT_UA, FETCH_TIMEOUT_MS, DEFAULT_SUBREDDITS } from "../config";
 import { urlToId, isThreadResolved } from "../store/db";
-import type { RawItem, ProfileSnapshot, OpenThread } from "../schema";
+import type { RawItem, ProfileSnapshot, OpenThread, CommentSample } from "../schema";
 import { scoreItem } from "../intelligence/score";
 
 const BASE = "https://old.reddit.com";
@@ -140,6 +140,64 @@ async function fetchOpenThreads(handle: string, recentComments: any[]): Promise<
     }
   }
   return threads;
+}
+
+// ---------------------------------------------------------------------------
+// Comment fetching (used by Recon hydrator via MCP + direct import)
+// ---------------------------------------------------------------------------
+
+function normalizeRedditUrl(url: string): string {
+  return url.replace("https://www.reddit.com", BASE).replace(/\/$/, "");
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reddit API comment tree is external; no published TypeScript types
+function walkCommentTree(children: unknown[], out: CommentSample[]): void {
+  for (const child of children) {
+    const c = child as { kind?: string; data?: Record<string, unknown> };
+    if (c?.kind !== "t1" || !c.data) continue;
+    const d = c.data;
+    const id = typeof d.id === "string" ? d.id : null;
+    const body = typeof d.body === "string" ? d.body : null;
+    if (!id || !body) continue;
+    if (body === "[deleted]" || body === "[removed]") continue;
+    const replies = d.replies as { data?: { children?: unknown[] } } | "" | undefined;
+    const replyChildren =
+      replies && typeof replies === "object" ? replies.data?.children ?? [] : [];
+    out.push({
+      id,
+      author: typeof d.author === "string" ? d.author : undefined,
+      body: body.slice(0, 800),
+      score: typeof d.score === "number" ? d.score : 0,
+      replyCount: replyChildren.length,
+      url:
+        typeof d.permalink === "string"
+          ? d.permalink.startsWith("http")
+            ? d.permalink
+            : `https://www.reddit.com${d.permalink}`
+          : undefined,
+    });
+    if (replyChildren.length) walkCommentTree(replyChildren, out);
+  }
+}
+
+function flattenCommentTree(json: unknown): CommentSample[] {
+  const arr = Array.isArray(json) ? json : null;
+  if (!arr || arr.length < 2) return [];
+  const commentsListing = arr[1] as { data?: { children?: unknown[] } };
+  const out: CommentSample[] = [];
+  walkCommentTree(commentsListing?.data?.children ?? [], out);
+  return out;
+}
+
+export async function getComments(
+  postUrl: string,
+  opts: { limit?: number; depth?: number } = {},
+): Promise<CommentSample[]> {
+  const { limit = 20, depth = 2 } = opts;
+  const base = normalizeRedditUrl(postUrl);
+  const url = `${base}.json?limit=${limit}&depth=${depth}&sort=top`;
+  const json = await redditFetch(url);
+  return flattenCommentTree(json);
 }
 
 export async function scrapeOwnProfile(handle: string): Promise<ProfileSnapshot> {
