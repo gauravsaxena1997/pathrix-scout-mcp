@@ -308,6 +308,9 @@ async function runAnalyzeVideo(urls: string[]) {
 
 const PLATFORM_ENUM = z.enum(["reddit", "hn", "github", "rss", "youtube", "x", "instagram", "polymarket", "web"]);
 
+// ─── Apify scraper (lazy import to avoid loading apify-client unless needed) ──
+async function getApify() { return import("./scrapers/apify"); }
+
 // ─── Register all Scout tools on the MCP server ───────────────────────────────
 
 export function registerScoutTools(mcpServer: McpServer) {
@@ -566,6 +569,89 @@ export function registerScoutTools(mcpServer: McpServer) {
       const { getComments } = await import("./scrapers/reddit");
       const comments = await getComments(post_url, { limit, depth });
       return { content: [{ type: "text", text: JSON.stringify(comments, null, 2) }] };
+    }
+  );
+
+  mcpServer.tool(
+    "scrape_apify",
+    `Scout: Run an Apify actor to scrape LinkedIn, Upwork, Fiverr, Instagram, or X. Requires APIFY_TOKENS in .env.
+
+Actors available:
+- upwork-jobs          : Upwork job listings (query = search keyword, e.g. "react developer")
+- linkedin-jobs        : LinkedIn job listings (query = keyword, e.g. "next.js engineer")
+- linkedin-profiles    : LinkedIn profiles (query = profile URL or comma-separated URLs)
+- linkedin-posts       : Posts from a LinkedIn profile (query = profile URL)
+- linkedin-enrichment  : Enrich LinkedIn profiles with live data (query = profile URL or comma-separated)
+- linkedin-full-profiles: Full LinkedIn profile with email + phone (query = profile URL)
+- instagram-posts      : Instagram posts from a user (query = username, e.g. "levelsio")
+- instagram-profiles   : Instagram profile bio + posts (query = username)
+- fiverr-listings      : Fiverr gig search (query = keyword, e.g. "react developer")
+- x-posts              : X/Twitter posts from a user (query = username, e.g. "levelsio")
+
+Returns RawItem[] normalized to Scout schema, ready for score_and_rank or push_to_pathrix.`,
+    {
+      actor: z
+        .enum([
+          "upwork-jobs",
+          "linkedin-jobs",
+          "linkedin-profiles",
+          "linkedin-posts",
+          "linkedin-enrichment",
+          "linkedin-full-profiles",
+          "peopleperhour-jobs",
+          "instagram-posts",
+          "instagram-profiles",
+          "fiverr-listings",
+          "x-posts",
+        ])
+        .describe("Which Apify actor to run"),
+      query: z.string().describe("Search keyword or profile URL - meaning depends on actor (see tool description)"),
+      limit: z.number().optional().default(20).describe("Max results to fetch"),
+      extra_input: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .default({})
+        .describe("Actor-specific input overrides merged on top of defaults (e.g. { location: 'remote' } for linkedin-jobs)"),
+    },
+    async ({ actor, query, limit, extra_input }) => {
+      const { scrapeApify, getApifyStatus } = await getApify();
+      const status = getApifyStatus();
+      if (!status.configured) {
+        return {
+          content: [{
+            type: "text",
+            text: "APIFY_TOKENS not set. Add comma-separated Apify API tokens to .env:\nAPify_TOKENS=apify_api_xxx,apify_api_yyy",
+          }],
+        };
+      }
+      const items = await scrapeApify(
+        actor as import("./scrapers/apify").ApifyActorKey,
+        query,
+        limit,
+        extra_input as Record<string, unknown>
+      );
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ actor, query, limit, count: items.length, items }, null, 2),
+        }],
+      };
+    }
+  );
+
+  mcpServer.tool(
+    "get_apify_status",
+    "Scout: Check Apify integration status - whether APIFY_TOKENS is set, how many token accounts are configured, and which actors are available.",
+    {},
+    async () => {
+      const { getApifyStatus } = await getApify();
+      const status = getApifyStatus();
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify(status, null, 2),
+        }],
+      };
     }
   );
 }

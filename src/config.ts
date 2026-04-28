@@ -107,6 +107,11 @@ export const RATE_LIMITS = {
 export const FETCH_TIMEOUT_MS = 10_000;
 export const MAX_CONCURRENT = 8;
 
+// ─── Apify token pool ─────────────────────────────────────────────────────────
+// Comma-separated Apify API tokens for round-robin rotation.
+// Add more accounts by appending ,<token> - no code changes needed.
+export const APIFY_TOKENS_RAW = process.env.APIFY_TOKENS ?? "";
+
 // ─── Source quality weights (editorial trust, used in RRF stream weight) ──────
 // Values from empirical analysis: HN and GitHub have higher signal-to-noise.
 // TODO: add Ollama-based LLM reranking via SCOUT_OLLAMA_URL for zero-cost local rerank.
@@ -120,4 +125,8 @@ export const SOURCE_QUALITY: Record<string, number> = {
   x: 0.60,
   instagram: 0.55,
   polymarket: 0.70,
+  // Apify-sourced platforms
+  linkedin: 0.75,
+  upwork: 0.80,
+  fiverr: 0.65,
 };

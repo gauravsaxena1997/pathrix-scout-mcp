@@ -150,7 +150,7 @@ function normalizeRedditUrl(url: string): string {
   return url.replace("https://www.reddit.com", BASE).replace(/\/$/, "");
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reddit API comment tree is external; no published TypeScript types
+ 
 function walkCommentTree(children: unknown[], out: CommentSample[]): void {
   for (const child of children) {
     const c = child as { kind?: string; data?: Record<string, unknown> };
