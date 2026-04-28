@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Platform } from "./schema";
 import type { RawItem } from "./schema";
+import type { OnEventHook } from "./index";
 import { applyScores } from "./intelligence/score";
 import { rrfFuse, buildStreams, nearDedup } from "./intelligence/fusion";
 import { runScrapers } from "./intelligence/parallel";
@@ -313,7 +314,9 @@ async function getApify() { return import("./scrapers/apify"); }
 
 // ─── Register all Scout tools on the MCP server ───────────────────────────────
 
-export function registerScoutTools(mcpServer: McpServer) {
+export function registerScoutTools(mcpServer: McpServer, config?: { onEvent?: OnEventHook }) {
+  const emit = (type: string, payload: Record<string, unknown>) =>
+    config?.onEvent?.({ type, payload, timestamp: new Date().toISOString() });
   mcpServer.tool(
     "search_topic",
     "Scout: Search a topic across Reddit, HN, GitHub, RSS, YouTube, X, Instagram, and Polymarket. Returns RRF-fused ranked results.",
@@ -329,6 +332,7 @@ export function registerScoutTools(mcpServer: McpServer) {
     },
     async ({ query, sources, timeframe_days, limit }) => {
       const report = await runSearchTopic(query, sources as Platform[], timeframe_days, limit);
+      await emit("scout.search_complete", { query, itemCount: report.items.length, sources });
       return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
     }
   );
@@ -364,7 +368,7 @@ export function registerScoutTools(mcpServer: McpServer) {
 
   mcpServer.tool(
     "scrape_own_profiles",
-    "Scout: Scrape own social profiles (Reddit, YouTube, X, Instagram) for follower count, recent posts, and engagement stats. Called by Pathrix PROFILE_SYNC cron every 3 hours.",
+    "Scout: Scrape own social profiles (Reddit, YouTube, X, Instagram) for follower count, recent posts, and engagement stats. Handles are read from SCOUT_*_HANDLE env vars or set via configureHandles().",
     {
       platforms: z
         .array(z.enum(["reddit", "youtube", "x", "instagram"]))
@@ -588,7 +592,7 @@ Actors available:
 - fiverr-listings      : Fiverr gig search (query = keyword, e.g. "react developer")
 - x-posts              : X/Twitter posts from a user (query = username, e.g. "levelsio")
 
-Returns RawItem[] normalized to Scout schema, ready for score_and_rank or push_to_pathrix.`,
+Returns RawItem[] normalized to Scout schema, ready for score_and_rank or downstream processing.`,
     {
       actor: z
         .enum([

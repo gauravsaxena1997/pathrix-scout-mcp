@@ -1,6 +1,23 @@
+import { z } from "zod";
 import type { Platform } from "./schema";
 
-export const SCOUT_UA = "pathrix-scout/1.0 (personal career OS)";
+// ─── Config schema (all fields optional - Scout degrades gracefully) ──────────
+
+export const ScoutConfigSchema = z.object({
+  searxngUrl: z.string().url().optional(),
+  braveApiKey: z.string().optional(),
+  handles: z.object({
+    reddit: z.string().optional(),
+    youtube: z.string().optional(),
+    x: z.string().optional(),
+    instagram: z.string().optional(),
+  }).optional(),
+  apifyTokens: z.string().optional(),
+});
+
+export type ScoutConfig = z.infer<typeof ScoutConfigSchema>;
+
+export const SCOUT_UA = "pathrix-scout/1.0";
 
 // ─── Own profile handles ───────────────────────────────────────────────────────
 
@@ -23,7 +40,7 @@ export const OWN_HANDLES: Partial<Record<Platform, string>> = {
   instagram: process.env.SCOUT_IG_HANDLE ?? "",
 };
 
-// Call this to inject known handles (e.g. from Pathrix profile data) without env vars.
+// Call this to inject known handles (e.g. from your profile settings) without env vars.
 // Any non-empty override wins over the env-var default.
 export function configureHandles(overrides: Partial<Record<Platform, string>>) {
   for (const [platform, handle] of Object.entries(overrides)) {

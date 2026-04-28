@@ -1,6 +1,4 @@
-# Pathrix Scout MCP
-
-> **Pathrix** (Path Matrix) - a personal career OS that tracks every path you take: leads, content, scheduling, market intelligence, and tooling. Scout is its intelligence layer - the part that watches the web so you do not have to.
+# @pathrix/scout
 
 Community intelligence for your AI assistant. Scout scrapes Reddit, Hacker News, GitHub, YouTube, X, Instagram, Polymarket, and 16+ RSS feeds - ranks results across all of them, and exposes everything as MCP tools your AI can call directly.
 
@@ -307,4 +305,4 @@ Open an issue before starting a large feature so we can align first.
 
 ## License
 
-MIT - [github.com/gauravsaxena1997/pathrix-scout-mcp](https://github.com/gauravsaxena1997/pathrix-scout-mcp)
+MIT - [@pathrix/scout](https://github.com/pathrix-os/scout)
