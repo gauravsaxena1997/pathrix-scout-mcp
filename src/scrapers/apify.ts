@@ -167,7 +167,6 @@ function safeDate(val: unknown): string {
   return new Date().toISOString();
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- each mapper receives untyped external actor output
 const OUTPUT_MAPPERS: Record<ApifyActorKey, OutputMapper> = {
   "upwork-jobs": (raw, platform) => {
     const url = safeUrl(raw?.url ?? raw?.jobUrl ?? raw?.link);
