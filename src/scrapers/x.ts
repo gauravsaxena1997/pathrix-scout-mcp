@@ -46,9 +46,7 @@ function mapTweet(tweet: any, _idx: number): RawItem | null {
   let publishedAt = new Date().toISOString();
   if (createdAt) {
     try {
-      publishedAt = createdAt.includes("T")
-        ? new Date(createdAt).toISOString()
-        : new Date(createdAt).toISOString();
+      publishedAt = new Date(createdAt).toISOString();
     } catch { /* use default */ }
   }
 

@@ -305,12 +305,19 @@ async function runAnalyzeVideo(urls: string[]) {
   return analyzeVideos(urls);
 }
 
+// ─── Tool: analyze_image ──────────────────────────────────────────────────────
+
+async function runAnalyzeImage(urls: string[]) {
+  const { analyzeImages } = await import("./vision/image_analyzer");
+  return analyzeImages(urls);
+}
+
 // ─── Platform enum (shared across MCP tool schemas) ──────────────────────────
 
 const PLATFORM_ENUM = z.enum(["reddit", "hn", "github", "rss", "youtube", "x", "instagram", "polymarket", "web"]);
 
 // ─── Apify scraper (lazy import to avoid loading apify-client unless needed) ──
-async function getApify() { return import("./scrapers/apify"); }
+async function getApify() { return import(/* webpackIgnore: true */ "./scrapers/apify"); }
 
 // ─── Register all Scout tools on the MCP server ───────────────────────────────
 
@@ -551,12 +558,24 @@ export function registerScoutTools(mcpServer: McpServer, config?: { onEvent?: On
 
   mcpServer.tool(
     "analyze_video",
-    "Scout: Download and transcribe one or more public videos (YouTube, Instagram, any yt-dlp-supported URL). Returns transcript + metadata.",
+    "Scout: Download and transcribe one or more public videos (YouTube, Instagram, any yt-dlp-supported URL). Also accepts direct CDN/MP4 URLs (e.g. from Apify scrapes) - skips yt-dlp for those. Returns transcript + metadata.",
     {
-      urls: z.array(z.string().url()).describe("One or more video URLs to analyze"),
+      urls: z.array(z.string().url()).describe("One or more video URLs to analyze. Accepts YouTube/Instagram post URLs or direct CDN MP4 URLs."),
     },
     async ({ urls }) => {
       const results = await runAnalyzeVideo(urls);
+      return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    }
+  );
+
+  mcpServer.tool(
+    "analyze_image",
+    "Scout: Analyze one or more images using a local Ollama vision model (default: gemma4:latest). Extracts all visible text and describes visual content - handles infographics, charts, styled slides, and photos. Ideal for processing carousel posts from Instagram scrapes. Override model via SCOUT_VISION_MODEL env var.",
+    {
+      urls: z.array(z.string().url()).describe("One or more image URLs to analyze (JPG, PNG, WebP, GIF). Accepts direct CDN URLs from Apify Instagram scrapes."),
+    },
+    async ({ urls }) => {
+      const results = await runAnalyzeImage(urls);
       return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
     }
   );
@@ -624,7 +643,7 @@ Returns RawItem[] normalized to Scout schema, ready for score_and_rank or downst
         return {
           content: [{
             type: "text",
-            text: "APIFY_TOKENS not set. Add comma-separated Apify API tokens to .env:\nAPify_TOKENS=apify_api_xxx,apify_api_yyy",
+            text: "APIFY_TOKENS not set. Add comma-separated Apify API tokens to .env:\nAPIFY_TOKENS=apify_api_xxx,apify_api_yyy",
           }],
         };
       }

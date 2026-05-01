@@ -1,5 +1,6 @@
-import { downloadVideo } from "./downloader";
+import { downloadVideo, downloadSubtitleResult } from "./downloader";
 import { transcribeVideo } from "./transcriber";
+import { parseVtt } from "./subtitle-parser";
 
 export interface VideoAnalysis {
   url: string;
@@ -12,9 +13,29 @@ export interface VideoAnalysis {
 }
 
 export async function analyzeVideo(url: string): Promise<VideoAnalysis> {
+  // Fast path: auto-generated subtitles (no audio download, no Whisper, ~20s)
+  const subtitles = await downloadSubtitleResult(url).catch(() => null);
+  if (subtitles) {
+    try {
+      const parsed = parseVtt(subtitles.vttPath);
+      return {
+        url,
+        title: subtitles.title,
+        duration: subtitles.duration,
+        language: parsed.language,
+        transcript: parsed.text,
+        segments: parsed.segments,
+        analyzedAt: new Date().toISOString(),
+      };
+    } finally {
+      subtitles.cleanup();
+    }
+  }
+
+  // Slow path: download audio + Whisper transcription (~60-120s)
   const download = await downloadVideo(url);
   try {
-    const transcript = transcribeVideo(download.videoPath);
+    const transcript = await transcribeVideo(download.videoPath);
     return {
       url,
       title: download.title,
@@ -29,14 +50,27 @@ export async function analyzeVideo(url: string): Promise<VideoAnalysis> {
   }
 }
 
-export async function analyzeVideos(urls: string[]): Promise<VideoAnalysis[]> {
+export interface VideoAnalysisError {
+  url: string;
+  error: string;
+}
+
+export interface AnalyzeVideosResult {
+  results: VideoAnalysis[];
+  errors: VideoAnalysisError[];
+}
+
+export async function analyzeVideos(urls: string[]): Promise<AnalyzeVideosResult> {
   const results: VideoAnalysis[] = [];
+  const errors: VideoAnalysisError[] = [];
   for (const url of urls) {
     try {
       results.push(await analyzeVideo(url));
     } catch (err) {
-      console.error(`[scout/vision] Failed: ${url} -`, (err as Error).message);
+      const message = (err as Error).message;
+      console.error(`[scout/vision] Failed: ${url} -`, message);
+      errors.push({ url, error: message });
     }
   }
-  return results;
+  return { results, errors };
 }
