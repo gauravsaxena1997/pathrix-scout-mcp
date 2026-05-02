@@ -58,10 +58,13 @@ export async function searchYoutube(query: string, limit = 20): Promise<RawItem[
   }
 }
 
-export async function getYoutubeChannelVideos(channelUrl: string, limit = 10): Promise<RawItem[]> {
+// dateAfter: yt-dlp --dateafter format YYYYMMDD. Filters to videos uploaded on or after that date.
+export async function getYoutubeChannelVideos(channelUrl: string, limit = 10, dateAfter?: string): Promise<RawItem[]> {
   let raw: string;
   try {
-    raw = ytdlp([channelUrl, "--flat-playlist", "--dump-single-json", "--playlist-end", String(limit), "--no-warnings", "--quiet"]);
+    const args = [channelUrl, "--flat-playlist", "--dump-single-json", "--playlist-end", String(limit), "--no-warnings", "--quiet"];
+    if (dateAfter) args.push("--dateafter", dateAfter);
+    raw = ytdlp(args);
   } catch {
     return [];
   }

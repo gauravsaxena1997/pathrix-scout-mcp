@@ -408,6 +408,79 @@ const OUTPUT_MAPPERS: Record<ApifyActorKey, OutputMapper> = {
   },
 };
 
+// ─── Instagram Channel Posts ──────────────────────────────────────────────────
+// Richer typed fetcher for channel analysis - preserves mediaType + videoUrl
+// that the generic scrapeApify mapper discards.
+
+export type InstagramPost = {
+  postId: string;
+  url: string;
+  caption: string;
+  mediaType: "Image" | "Video" | "Sidecar";
+  videoUrl?: string;
+  author: string;
+  publishedAt: string;
+  likes: number;
+  comments: number;
+};
+
+export async function getInstagramChannelPosts(
+  handle: string,
+  limit: number,
+  since?: Date
+): Promise<InstagramPost[]> {
+  if (!apifyPool.configured) throw new Error("APIFY_TOKENS not set");
+
+  const token = apifyPool.next();
+  const client = new ApifyClient({ token });
+  const actorId = APIFY_ACTOR_REGISTRY["instagram-posts"];
+
+  const run = await client.actor(actorId).call(
+    {
+      usernames: [handle.replace(/^@/, "")],
+      resultsLimit: limit * 3, // over-fetch so date filter doesn't leave us short
+    },
+    { timeout: 120 }
+  );
+
+  const { items } = await client.dataset(run.defaultDatasetId).listItems({ limit: limit * 3 });
+
+  const posts: InstagramPost[] = [];
+  for (const item of items) {
+    const url = safeUrl(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Apify output is untyped
+      (item as any)?.url ?? ((item as any)?.shortCode && `https://www.instagram.com/p/${(item as any).shortCode}/`)
+    );
+    if (!url) continue;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Apify output is untyped
+    const raw = item as any;
+    const publishedAt = safeDate(raw?.timestamp ?? raw?.takenAt ?? raw?.publishedAt);
+
+    if (since && new Date(publishedAt) < since) continue;
+
+    const rawType = safeStr(raw?.type ?? raw?.mediaType, "Image");
+    const mediaType: InstagramPost["mediaType"] =
+      rawType === "Video" || rawType === "Sidecar" ? rawType : "Image";
+
+    posts.push({
+      postId: safeStr(raw?.id ?? raw?.shortCode, urlToId(url)),
+      url,
+      caption: safeStr(raw?.caption ?? raw?.text, ""),
+      mediaType,
+      videoUrl: typeof raw?.videoUrl === "string" ? raw.videoUrl : undefined,
+      author: safeStr(raw?.ownerUsername ?? raw?.username ?? raw?.author, handle),
+      publishedAt,
+      likes: safeNum(raw?.likesCount ?? raw?.likes, 0),
+      comments: safeNum(raw?.commentsCount ?? raw?.comments, 0),
+    });
+
+    if (posts.length >= limit) break;
+  }
+
+  return posts;
+}
+
 // ─── Main Scraper Function ────────────────────────────────────────────────────
 
 export async function scrapeApify(
