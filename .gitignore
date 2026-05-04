@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Python venv (yt-dlp, whisper)
+.venv/
+__pycache__/
+*.pyc
+
+# Local caches / runtime data
+.transcripts/
+.cache/
+.local/
+tmp/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Code-review-graph artifacts
+.code-review-graph/
+
+# Env
+.env
+.env.local
+.env.*.local

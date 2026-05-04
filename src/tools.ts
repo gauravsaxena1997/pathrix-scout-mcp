@@ -8,7 +8,7 @@ import { applyScores } from "./intelligence/score";
 import { rrfFuse, buildStreams, nearDedup } from "./intelligence/fusion";
 import { runScrapers } from "./intelligence/parallel";
 import { SOURCE_QUALITY, OWN_HANDLES, WEB_SEARCH } from "./config";
-import { saveRun, saveItems, searchItems, saveProfileSnapshot, getLatestProfileSnapshot, resolveThread, getRecentItems } from "./store/db";
+import { saveRun, saveItems, searchItems, saveProfileSnapshot, getLatestProfileSnapshot, resolveThread, getRecentItems, urlToId } from "./store/db";
 
 // ─── Lazy scraper imports ─────────────────────────────────────────────────────
 
@@ -19,7 +19,9 @@ async function getRss()        { return import("./scrapers/rss"); }
 async function getYoutube()    { return import("./scrapers/youtube"); }
 // webpackIgnore: these scrapers use spawnSync with dynamic paths (bird-search, patchright) - Turbopack must not bundle them
 async function getX()          { return import(/* webpackIgnore: true */ "./scrapers/x"); }
-async function getInstagram()  { return import(/* webpackIgnore: true */ "./scrapers/instagram"); }
+// Instagram: routed through Apify (HTTP-only, no Python/spawnSync). Search still uses the legacy Python scraper.
+async function getInstagramSearch() { return import(/* webpackIgnore: true */ "./scrapers/instagram"); }
+async function getApifyScraper()    { return import("./scrapers/apify"); }
 async function getPolymarket() { return import(/* webpackIgnore: true */ "./scrapers/polymarket"); }
 async function getWeb()       { return import("./scrapers/web"); }
 
@@ -62,7 +64,7 @@ async function runSearchTopic(
     scraperList.push({ name: "x", fn: () => m.searchX(query, 20) });
   }
   if (sources.includes("instagram")) {
-    const m = await getInstagram();
+    const m = await getInstagramSearch();
     scraperList.push({ name: "instagram", fn: () => m.searchInstagram(query, 20) });
   }
   if (sources.includes("polymarket")) {
@@ -136,7 +138,38 @@ async function runScrapePlatform(
       return m.searchX(value, limit);
     }
     case "instagram": {
-      const m = await getInstagram();
+      if (inputType === "profile") {
+        const handle = value.replace(/^@/, "");
+        const apify = await getApifyScraper();
+        const posts = await apify.getInstagramChannelPosts(handle, limit);
+        return posts.map((p) => ({
+          id: urlToId(p.url),
+          source: "instagram" as const,
+          title: (p.caption ?? "").slice(0, 200),
+          body: p.caption ?? "",
+          url: p.url,
+          author: `@${p.author}`,
+          publishedAt: p.publishedAt ?? new Date().toISOString(),
+          scoutScore: 0,
+          engagement: { score: p.likes ?? 0, comments: p.comments ?? 0, ratio: undefined, topComment: undefined, probability: undefined },
+          // Carry image URLs + media type forward so the sweep skill can call analyze_image per slide.
+          mediaType: p.mediaType,
+          imageUrls: p.imageUrls,
+          videoUrl: p.videoUrl,
+          // Local artifact paths (downloaded by Apify scraper before CDN URLs expire).
+          artifacts: {
+            postId: p.postId,
+            channelHandle: p.author,
+            platform: "instagram",
+            mediaType: p.mediaType,
+            imagePaths: p.imagePaths,
+            videoPath: p.videoPath ?? null,
+            rawScrapePath: p.rawScrapePath,
+            cdnUrlsOriginal: p.cdnUrlsOriginal,
+          },
+        }));
+      }
+      const m = await getInstagramSearch();
       return m.searchInstagram(value, limit);
     }
     case "polymarket": {
@@ -214,8 +247,28 @@ async function runScrapeOwnProfiles(platforms: Platform[]) {
   if (platforms.includes("instagram")) {
     const handle = OWN_HANDLES.instagram;
     if (handle) {
-      const m = await getInstagram();
-      await scrapeOne("instagram", handle, () => m.scrapeInstagramProfile(handle));
+      const apify = await getApifyScraper();
+      await scrapeOne("instagram", handle, async () => {
+        const posts = await apify.getInstagramChannelPosts(handle, 30);
+        return {
+          platform: "instagram" as const,
+          handle,
+          fetchedAt: new Date().toISOString(),
+          followers: 0,
+          posts: posts.map((p) => ({
+            id: p.postId,
+            url: p.url,
+            content: p.caption,
+            publishedAt: p.publishedAt,
+            likes: p.likes,
+            comments: p.comments,
+            shares: 0,
+            views: 0,
+            isViral: p.likes > 10_000,
+          })),
+          stats: {},
+        };
+      });
     } else {
       results.push({ platform: "instagram", status: "skipped", reason: "SCOUT_IG_HANDLE not set" });
     }
@@ -261,7 +314,7 @@ async function runRawScrape(query: string, sources: Platform[], timeframeDays: n
     scraperList.push({ name: "x", fn: () => m.searchX(query, limit) });
   }
   if (sources.includes("instagram")) {
-    const m = await getInstagram();
+    const m = await getInstagramSearch();
     scraperList.push({ name: "instagram", fn: () => m.searchInstagram(query, limit) });
   }
   if (sources.includes("polymarket")) {
@@ -316,8 +369,8 @@ async function runAnalyzeImage(urls: string[]) {
 
 const PLATFORM_ENUM = z.enum(["reddit", "hn", "github", "rss", "youtube", "x", "instagram", "polymarket", "web"]);
 
-// ─── Apify scraper (lazy import to avoid loading apify-client unless needed) ──
-async function getApify() { return import(/* webpackIgnore: true */ "./scrapers/apify"); }
+// ─── Apify scraper alias (single bundled import, see getApifyScraper above) ──
+const getApify = getApifyScraper;
 
 // ─── Register all Scout tools on the MCP server ───────────────────────────────
 

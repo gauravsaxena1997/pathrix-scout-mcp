@@ -1,18 +1,17 @@
 import { spawnSync } from "child_process";
 import path from "path";
-import { fileURLToPath } from "url";
 import fs from "fs";
 import { urlToId } from "../store/db";
 import type { RawItem, ProfileSnapshot } from "../schema";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCRIPT = path.join(__dirname, "../python/instagram.py");
+// Use process.cwd() so the path resolves correctly whether this module is bundled or not
+const SCRIPT = path.join(process.cwd(), "packages/scout/src/python/instagram.py");
 
 function getVenvPython(): string {
   if (process.env.SCOUT_VENV_PYTHON) return process.env.SCOUT_VENV_PYTHON;
   const candidates = [
     path.join(process.cwd(), "src", "lib", "scout", ".venv", "bin", "python3"),
-    path.join(__dirname, "../../.venv", "bin", "python3"),
+    path.join(process.cwd(), "packages/scout/.venv", "bin", "python3"),
   ];
   return candidates.find((c) => fs.existsSync(c)) ?? "python3";
 }

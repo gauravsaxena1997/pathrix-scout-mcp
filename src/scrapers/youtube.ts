@@ -1,5 +1,6 @@
 import { spawnSync } from "child_process";
 import { urlToId } from "../store/db";
+import { saveRawScrape } from "../store/media-store";
 import type { RawItem, ProfileSnapshot } from "../schema";
 
 function ytdlp(args: string[]): string {
@@ -60,9 +61,17 @@ export async function searchYoutube(query: string, limit = 20): Promise<RawItem[
 
 // dateAfter: yt-dlp --dateafter format YYYYMMDD. Filters to videos uploaded on or after that date.
 export async function getYoutubeChannelVideos(channelUrl: string, limit = 10, dateAfter?: string): Promise<RawItem[]> {
+  // Normalize to the /videos tab so yt-dlp returns individual videos, not sub-playlist tabs
+  let url = channelUrl;
+  if (/^UC[a-zA-Z0-9_-]{22}$/.test(url)) {
+    url = `https://www.youtube.com/channel/${url}/videos`;
+  } else if (/\/(channel|c)\/[^/]+$/.test(url) || /\/@[^/]+$/.test(url)) {
+    url = `${url}/videos`;
+  }
+
   let raw: string;
   try {
-    const args = [channelUrl, "--flat-playlist", "--dump-single-json", "--playlist-end", String(limit), "--no-warnings", "--quiet"];
+    const args = [url, "--flat-playlist", "--dump-single-json", "--playlist-end", String(limit), "--no-warnings", "--quiet"];
     if (dateAfter) args.push("--dateafter", dateAfter);
     raw = ytdlp(args);
   } catch {
@@ -70,8 +79,26 @@ export async function getYoutubeChannelVideos(channelUrl: string, limit = 10, da
   }
   try {
     const playlist = JSON.parse(raw);
+    // Derive a channelId for media-store directory naming.
+    const channelKey =
+      /^UC[a-zA-Z0-9_-]{22}$/.test(channelUrl)
+        ? channelUrl
+        : (playlist?.channel_id as string | undefined) ?? (playlist?.uploader_id as string | undefined) ?? "unknown";
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- yt-dlp playlist entries have undocumented shape; mapped via mapVideo
-    return (playlist?.entries ?? []).flatMap((v: any) => mapVideo(v) ?? []).slice(0, limit);
+    const entries = (playlist?.entries ?? []) as any[];
+    const out: RawItem[] = [];
+    for (const v of entries.slice(0, limit)) {
+      const mapped = mapVideo(v);
+      if (!mapped) continue;
+      const videoId = (v?.id as string | undefined) ?? mapped.id;
+      // Mirror raw yt-dlp metadata so future re-classification doesn't need a re-pull.
+      try {
+        await saveRawScrape("youtube", channelKey, videoId, v);
+      } catch { /* non-fatal */ }
+      out.push(mapped);
+    }
+    return out;
   } catch {
     return [];
   }

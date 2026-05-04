@@ -2,6 +2,7 @@ import { ApifyClient } from "apify-client";
 import type { RawItem, Platform } from "../schema";
 import { urlToId } from "../store/db";
 import { scoreItem } from "../intelligence/score";
+import { downloadImageSlides, downloadVideoFile, saveRawScrape } from "../store/media-store";
 
 // ─── Token Pool ───────────────────────────────────────────────────────────────
 
@@ -418,6 +419,14 @@ export type InstagramPost = {
   caption: string;
   mediaType: "Image" | "Video" | "Sidecar";
   videoUrl?: string;
+  // Image URLs for vision analysis. For Image: [displayUrl]. For Sidecar (carousel): every slide. For Video: poster only.
+  imageUrls: string[];
+  // Original CDN URLs (kept for forensics; expire in hours).
+  cdnUrlsOriginal: string[];
+  // Local downloaded artifacts. Paths are absolute under PATHRIX_MEDIA_DIR.
+  imagePaths: Array<string | null>;
+  videoPath?: string | null;
+  rawScrapePath?: string;
   author: string;
   publishedAt: string;
   likes: number;
@@ -435,9 +444,10 @@ export async function getInstagramChannelPosts(
   const client = new ApifyClient({ token });
   const actorId = APIFY_ACTOR_REGISTRY["instagram-posts"];
 
+  const cleanHandle = handle.replace(/^@/, "");
   const run = await client.actor(actorId).call(
     {
-      usernames: [handle.replace(/^@/, "")],
+      username: [cleanHandle], // actor schema: username is array of usernames despite singular name
       resultsLimit: limit * 3, // over-fetch so date filter doesn't leave us short
     },
     { timeout: 120 }
@@ -463,12 +473,56 @@ export async function getInstagramChannelPosts(
     const mediaType: InstagramPost["mediaType"] =
       rawType === "Video" || rawType === "Sidecar" ? rawType : "Image";
 
+    // Apify shape varies. Carousel slides come in `images: string[]` or `childPosts: [{ displayUrl }]`.
+    // Single Image/Video posts use `displayUrl`. Capture all so analyze_image can run on every slide.
+    const childUrls: string[] = Array.isArray(raw?.childPosts)
+      ? (raw.childPosts as Array<{ displayUrl?: unknown }>)
+          .map((c) => c?.displayUrl)
+          .filter((u): u is string => typeof u === "string")
+      : [];
+    const imagesArr: string[] = Array.isArray(raw?.images)
+      ? (raw.images as unknown[]).filter((u): u is string => typeof u === "string")
+      : [];
+    const displayUrl: string | undefined = typeof raw?.displayUrl === "string" ? raw.displayUrl : undefined;
+    const imageUrls = Array.from(
+      new Set([...(displayUrl ? [displayUrl] : []), ...imagesArr, ...childUrls])
+    );
+
+    const postId = safeStr(raw?.id ?? raw?.shortCode, urlToId(url));
+    const videoUrl = typeof raw?.videoUrl === "string" ? raw.videoUrl : undefined;
+
+    // Persist raw Apify item + media to local store BEFORE the URLs expire.
+    // Idempotent and cheap if files already exist.
+    let rawScrapePath: string | undefined;
+    let imagePaths: Array<string | null> = [];
+    let videoPathLocal: string | null = null;
+    try {
+      rawScrapePath = await saveRawScrape("instagram", cleanHandle, postId, raw);
+    } catch { /* keep going - raw save failure shouldn't block sweep */ }
+    if (imageUrls.length > 0) {
+      try {
+        imagePaths = await downloadImageSlides("instagram", cleanHandle, postId, imageUrls);
+      } catch {
+        imagePaths = imageUrls.map(() => null);
+      }
+    }
+    if (videoUrl) {
+      try {
+        videoPathLocal = await downloadVideoFile("instagram", cleanHandle, postId, videoUrl);
+      } catch { /* leave null */ }
+    }
+
     posts.push({
-      postId: safeStr(raw?.id ?? raw?.shortCode, urlToId(url)),
+      postId,
       url,
       caption: safeStr(raw?.caption ?? raw?.text, ""),
       mediaType,
-      videoUrl: typeof raw?.videoUrl === "string" ? raw.videoUrl : undefined,
+      videoUrl,
+      imageUrls,
+      cdnUrlsOriginal: imageUrls,
+      imagePaths,
+      videoPath: videoPathLocal,
+      rawScrapePath,
       author: safeStr(raw?.ownerUsername ?? raw?.username ?? raw?.author, handle),
       publishedAt,
       likes: safeNum(raw?.likesCount ?? raw?.likes, 0),
